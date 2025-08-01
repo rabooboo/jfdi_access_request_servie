@@ -1,0 +1,10 @@
+Packages
+.build
+xcuserdata
+*.xcodeproj
+DerivedData/
+.DS_Store
+db.sqlite
+.swiftpm
+.env
+cestlavie-mvp-9363c0deaa29.json
