@@ -7,33 +7,76 @@
 
 import Vapor
 import Fluent
+import VaporToOpenAPI
 
 struct JoinRequestController: RouteCollection {
-    
+
     // MARK: - Properties
     let communityURLString: String  // Community-URL des Community Services
-    
+
     func boot(routes: any RoutesBuilder) throws {
-        
         let joinTokenAuthGroup = routes.grouped(UserAuthMiddleware()).grouped("v1")
         let joinRoutes = joinTokenAuthGroup.grouped("join")
 
-        joinRoutes.post(":targetType", ":targetID", "submit", use: submitJoinRequest)
+        // POST /v1/join/:targetType/:targetID/submit
+        joinRoutes.post(":targetType", ":targetID", "submit", use: submitJoinRequest).openAPI(
+            tags: "Join Requests",
+            summary: "Beitrittsanfrage absenden",
+            description: "Reicht eine Beitrittsanfrage für ein Ziel (z. B. Community) ein. Erfordert einen gültigen Join-Token.",
+            body: .type(SubmitJoinRequestInput.self),
+            response: .type(HTTPStatus.self),
+            auth: .bearer()
+        )
 
-        joinRoutes.post("link", use: generateJoinLink)
-        joinRoutes.get("requests", use: listJoinRequests)
-        joinRoutes.post("requests", ":id", "approve", use: approveJoinRequest)
-        joinRoutes.post("requests", ":id", "reject", use: rejectJoinRequest)
+        // POST /v1/join/link
+        joinRoutes.post("link", use: generateJoinLink).openAPI(
+            tags: "Join Requests",
+            summary: "Join-Link generieren",
+            description: "Erzeugt einen zeitlich befristeten Link (inkl. Token), mit dem andere Nutzer eine Beitrittsanfrage stellen können.",
+            body: .type(JoinLinkInput.self),
+            response: .type(JoinLinkResponse.self),
+            auth: .bearer()
+        )
+
+        // GET /v1/join/requests?targetType=…&targetID=…
+        joinRoutes.get("requests", use: listJoinRequests).openAPI(
+            tags: "Join Requests",
+            summary: "Offene Beitrittsanfragen listen",
+            description: "Listet alle offenen (pending) Beitrittsanfragen für ein Ziel auf. Schreibberechtigung für das Ziel ist erforderlich.",
+            query: .type(ListJoinRequestsQuery.self),
+            response: .type([JoinRequestOpenAPI].self),
+            auth: .bearer()
+        )
+
+        // POST /v1/join/requests/:id/approve
+        joinRoutes.post("requests", ":id", "approve", use: approveJoinRequest).openAPI(
+            tags: "Join Requests",
+            summary: "Beitrittsanfrage genehmigen",
+            description: "Genehmigt eine Beitrittsanfrage und verknüpft den Anfragenden mit dem Ziel.",
+            response: .type(HTTPStatus.self),
+            auth: .bearer()
+        )
+
+        // POST /v1/join/requests/:id/reject
+        joinRoutes.post("requests", ":id", "reject", use: rejectJoinRequest).openAPI(
+            tags: "Join Requests",
+            summary: "Beitrittsanfrage ablehnen",
+            description: "Lehnt eine Beitrittsanfrage ab.",
+            response: .type(HTTPStatus.self),
+            auth: .bearer()
+        )
     }
 
     // MARK: - Anfrage absenden
-    func submitJoinRequest(req: Request) async throws -> HTTPStatus {
-        struct Input: Content {
-            var message: String?
-            var token: String
-        }
+    /// Body für submitJoinRequest
+    struct SubmitJoinRequestInput: Content {
+        var message: String?
+        var token: String
+    }
 
-        let input = try req.content.decode(Input.self)
+    @Sendable
+    func submitJoinRequest(req: Request) async throws -> HTTPStatus {
+        let input = try req.content.decode(SubmitJoinRequestInput.self)
         let user = try req.auth.require(User.self)
         let (targetType, targetID, _) = try parseParams(req)
 
@@ -54,16 +97,16 @@ struct JoinRequestController: RouteCollection {
     }
 
     // MARK: - Join-Link generieren
-    func generateJoinLink(req: Request) async throws -> JoinLinkResponse {
-        struct JoinLinkInput: Content {
-            var targetType: JoinRequestTargetType
-            var targetID: UUID
-            var expiresInHours: Int?
-        }
+    struct JoinLinkInput: Content {
+        var targetType: JoinRequestTargetType
+        var targetID: UUID
+        var expiresInHours: Int?
+    }
 
+    func generateJoinLink(req: Request) async throws -> JoinLinkResponse {
         let input = try req.content.decode(JoinLinkInput.self)
         let user = try req.auth.require(User.self)
-        
+
         // Zugriffsprüfung
         let hasWriteAccess = try await userHasWriteAccess(
             to: input.targetType,
@@ -94,6 +137,11 @@ struct JoinRequestController: RouteCollection {
     }
 
     // MARK: - Liste der JoinRequests
+    struct ListJoinRequestsQuery: Content {
+        let targetType: String
+        let targetID: UUID
+    }
+
     func listJoinRequests(req: Request) async throws -> [JoinRequest] {
         let user = try req.auth.require(User.self)
 
@@ -131,11 +179,11 @@ struct JoinRequestController: RouteCollection {
     func approveJoinRequest(req: Request) async throws -> HTTPStatus {
         let id = try req.parameters.require("id", as: UUID.self)
         let user = try req.auth.require(User.self)
-        
+
         guard let request = try await JoinRequest.find(id, on: req.db) else {
             throw Abort(.notFound)
         }
-        
+
         // Zugriffsprüfung
         let hasWriteAccess = try await userHasWriteAccess(
             to: request.targetType,
@@ -159,11 +207,11 @@ struct JoinRequestController: RouteCollection {
     func rejectJoinRequest(req: Request) async throws -> HTTPStatus {
         let id = try req.parameters.require("id", as: UUID.self)
         let user = try req.auth.require(User.self)
-        
+
         guard let request = try await JoinRequest.find(id, on: req.db) else {
             throw Abort(.notFound)
         }
-        
+
         // Zugriffsprüfung
         let hasWriteAccess = try await userHasWriteAccess(
             to: request.targetType,
@@ -206,7 +254,7 @@ struct JoinRequestController: RouteCollection {
 
         return entry.expiresAt > Date()
     }
-    
+
     private func userHasWriteAccess(to targetType: JoinRequestTargetType, targetID: UUID, userID: UUID, req: Request) async throws -> Bool {
         guard let token = req.headers.bearerAuthorization?.token else {
             throw Abort(.unauthorized, reason: "Authorization token missing")

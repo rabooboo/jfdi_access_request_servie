@@ -8,4 +8,5 @@ func routes(_ app: Application) throws {
     }
 
     try app.register(collection: JoinRequestController(communityURLString: communityURLString))
+    try app.register(collection: OpenAPIController())
 }

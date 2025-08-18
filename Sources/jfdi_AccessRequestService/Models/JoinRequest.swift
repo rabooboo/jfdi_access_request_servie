@@ -57,3 +57,14 @@ final class JoinRequest: Model, @unchecked Sendable, Content {
         self.token = token
     }
 }
+
+struct JoinRequestOpenAPI: Content {
+    let id: UUID?
+    let targetID: UUID
+    let targetType: JoinRequestTargetType
+    let requester: UUID
+    let message: String?
+    let status: JoinRequestStatus
+    let token: String
+    let createdAt: Date?
+}
