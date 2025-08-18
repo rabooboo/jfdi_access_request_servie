@@ -10,7 +10,7 @@ import Vapor
 import VaporToOpenAPI
 
 struct OpenAPIController: RouteCollection {
-    func boot(routes: RoutesBuilder) throws {
+    func boot(routes: any RoutesBuilder) throws {
         routes.get("swagger", "swagger.json") { req in
           req.application.routes.openAPI(
             info: InfoObject(
